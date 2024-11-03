@@ -101,6 +101,14 @@ Not Found""".replace(
     b"\n", b"\r\n"
 )
 
+METHOD_NOT_ALLOWED_RESPONSE = b"""\
+HTTP/1.1 405 Method Not Allowed
+Content-type: text/plain
+Content-length: 17
+
+Method Not Allowed""".replace(
+    b"\n", b"\r\n"
+)
 
 with socket.socket() as server_sock:
     # Tell the kernel to reuse sockets that are in 'TIME_WAIT' state.
