@@ -8,6 +8,9 @@ import mimetypes
 import os
 from os.path import abspath
 import socket
+import typing
+import io
+
 from headers import Headers
 from request import Request
 
@@ -23,17 +26,58 @@ Content-length: {content_length}
 )
 
 
+class Response:
+    """
+    An HTTP response.
+
+    Parameters:
+        status: The response status line. e.g., "200 OK".
+        headers: The response headers.
+        body: A file containing the response body.
+        content: A string representing the response body. If this is
+            provided, then body is ignored.
+        encoding: An encoding for the content, if provided.
+    """
+
+    def __init__(
+        self,
+        status: str,
+        headers: typing.Optional[Headers] = None,
+        body: typing.Optional[typing.IO] = None,
+        content: typing.Optional[str] = None,
+        encoding: str = "utf 8",
+    ) -> None:
+
+        self.status = status.encode()
+        self.headers = headers or Headers()
+
+        if content is not None:
+            self.body = io.BytesIO(content.encode(encoding))
+        elif body is None:
+            self.body = io.BytesIO()
+        else:
+            self.body = body
+
+    def send(self, sock: socket.socket) -> None:
+        """
+        Write this response to a socket.
+        """
+        raise NotImplementedError
+
+
 def serve_file(sock: socket.socket, path: str) -> None:
     """
     Given a socket and the relative path to a file (relative to
-    SERVER_SOCK), send that file to the socket if it exists. If the file doesn't exist, sent a "404 Not Found" response.
+    SERVER_SOCK), send that file to the socket if it exists.
+    If the file doesn't exist, sent a "404 Not Found" response.
     """
     if path == "/":
         path = "/index.html"
 
     abspath = os.path.normpath(os.path.join(SERVER_ROOT, path.lstrip("/")))
     if not abspath.startswith(SERVER_ROOT):
-        sock.sendall(NOT_FOUND_RESPONSE)
+        response = Response(status="404 Not Found", content="Not Found")
+        response.send(sock)
         return
 
     try:
@@ -46,15 +90,13 @@ def serve_file(sock: socket.socket, path: str) -> None:
             if encoding is not None:
                 content_type += f"; charset={encoding}"
 
-            response_headers = FILE_RESPONSE_TEMPLATE.format(
-                content_type=content_type,
-                content_length=stat.st_size,
-            ).encode("ascii")
-
-            sock.sendall(response_headers)
-            sock.sendfile(f)
+            response = Response(status="200 OK", body=f)
+            response.headers.add("content-type", content_type)
+            response.send(sock)
+            return
     except FileNotFoundError:
-        sock.sendall(NOT_FOUND_RESPONSE)
+        response = Response(status="404 Not Found", content="Not Found")
+        response.send(sock)
         return
 
 
@@ -119,7 +161,8 @@ with socket.socket() as server_sock:
             try:
                 request = Request.from_socket(client_sock)
                 if "100-continue" in request.headers.get("expect", ""):
-                    client_sock.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+                    response = Response(status="100 Continue")
+                    response.send(client_sock)
 
                 try:
                     content_length = int(request.headers.get("content-length", "0"))
@@ -131,10 +174,14 @@ with socket.socket() as server_sock:
                     print("Request Body", body)
 
                 if request.method != "GET":
-                    client_sock.sendall(METHOD_NOT_ALLOWED_RESPONSE)
+                    response = Response(
+                        status="405 Method Not Allowed", content="Method Not Allowed"
+                    )
+                    response.send(client_sock)
                     continue
 
                 serve_file(client_sock, request.path)
             except Exception as e:
                 print(f"Failed to parse request: {e}")
-                client_sock.sendall(BAD_REQUEST_RESPONSE)
+                response = Response(status="400 Bad Request", content="Bad Request")
+                response.send(client_sock)
