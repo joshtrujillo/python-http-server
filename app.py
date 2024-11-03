@@ -5,6 +5,71 @@ A simple python http server.
 """
 
 import socket
+import typing
+
+
+class Request(typing.NamedTuple):
+    method: str
+    path: str
+    headers: typing.Mapping[str, str]
+
+    @classmethod
+    def from_socket(cls, sock: socket.socket) -> "Request":
+        """
+        Read and parse the request from a socket object.
+
+        Raises:
+            ValueError: When the request cannot be parsed.
+        """
+        lines = iter_lines(sock)
+
+        try:
+            request_line = next(lines).decode("ascii")
+        except StopIteration:
+            raise ValueError("Request line missing.")
+
+        try:
+            method, path, _ = request_line.split(" ")
+        except ValueError:
+            raise ValueError(f"Malformed request line {request_line!r}.")
+
+        headers = {}
+        for line in lines:
+            try:
+                name, _, value = line.decode("ascii").partition(":")
+                headers[name.lower()] = value.lstrip()
+            except ValueError:
+                raise ValueError(f"Malformed header line {line!r}.")
+
+        return cls(method=method.upper(), path=path, headers=headers)
+
+
+def iter_lines(
+    sock: socket.socket, bufsize: int = 16_384
+) -> typing.Generator[bytes, None, bytes]:
+    """
+    Given a socket, read all the individual CRLF-separated lines
+    and yield each one until an empty one is found. Returns the
+    remainder after the empty line.
+    """
+    buff = b""
+    while True:
+        data = sock.recv(bufsize)
+        if not data:
+            return b""
+
+        buff += data
+        while True:
+            try:
+                i = buff.index(b"\r\n")
+                line, buff = buff[:i], buff[i + 2 :]
+                if not line:
+                    return buff
+
+                yield line
+            except IndexError:
+                break
+
 
 HOST = "127.0.0.1"
 PORT = 9000
@@ -32,8 +97,11 @@ with socket.socket() as server_sock:
     print(f"Listening on {HOST}:{PORT}...")
     print(f"Visit http://{HOST}:{PORT}/")
 
-    # Accept incomming connection
-    client_sock, client_addr = server_sock.accept()
-    print(f"New connection from {client_addr}.")
-    with client_sock:
-        client_sock.sendall(RESPONSE)
+    while True:
+        # Accept incomming connection
+        client_sock, client_addr = server_sock.accept()
+        print(f"New connection from {client_addr}.")
+        with client_sock:
+            request = Request.from_socket(client_sock)
+            print(request)
+            client_sock.sendall(RESPONSE)
