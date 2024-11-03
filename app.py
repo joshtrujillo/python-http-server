@@ -118,6 +118,9 @@ with socket.socket() as server_sock:
         with client_sock:
             try:
                 request = Request.from_socket(client_sock)
+                if "100-continue" in request.headers.get("expect", ""):
+                    client_sock.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+
                 try:
                     content_length = int(request.headers.get("content-length", "0"))
                 except ValueError:
