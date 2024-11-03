@@ -8,8 +8,8 @@ import mimetypes
 import os
 from os.path import abspath
 import socket
-import typing
-from collections import defaultdict
+from headers import Headers
+from request import Request
 
 SERVER_ROOT = os.path.abspath("www")
 
@@ -21,61 +21,6 @@ Content-length: {content_length}
 """.replace(
     "\n", "\r\n"
 )
-
-
-class Headers:
-    def __init__(self) -> None:
-        self._headers = defaultdict(list)
-
-    def add(self, name: str, value: str) -> None:
-        self._headers[name.lower()].append(value)
-
-    def get_all(self, name: str) -> typing.List[str]:
-        return self._headers[name.lower()]
-
-    def get(
-        self, name: str, default: typing.Optional[str] = None
-    ) -> typing.Optional[str]:
-        try:
-            return self.get_all(name)[-1]
-        except IndexError:
-            return default
-
-
-class Request(typing.NamedTuple):
-    method: str
-    path: str
-    headers: typing.Mapping[str, str]
-
-    @classmethod
-    def from_socket(cls, sock: socket.socket) -> "Request":
-        """
-        Read and parse the request from a socket object.
-
-        Raises:
-            ValueError: When the request cannot be parsed.
-        """
-        lines = iter_lines(sock)
-
-        try:
-            request_line = next(lines).decode("ascii")
-        except StopIteration:
-            raise ValueError("Request line missing.")
-
-        try:
-            method, path, _ = request_line.split(" ")
-        except ValueError:
-            raise ValueError(f"Malformed request line {request_line!r}.")
-
-        headers = Headers()
-        for line in lines:
-            try:
-                name, _, value = line.decode("ascii").partition(":")
-                headers.add(name, value.lstrip())
-            except ValueError:
-                raise ValueError(f"Malformed header line {line!r}.")
-
-        return cls(method=method.upper(), path=path, headers=headers)
 
 
 def serve_file(sock: socket.socket, path: str) -> None:
@@ -111,33 +56,6 @@ def serve_file(sock: socket.socket, path: str) -> None:
     except FileNotFoundError:
         sock.sendall(NOT_FOUND_RESPONSE)
         return
-
-
-def iter_lines(
-    sock: socket.socket, bufsize: int = 16_384
-) -> typing.Generator[bytes, None, bytes]:
-    """
-    Given a socket, read all the individual CRLF-separated lines
-    and yield each one until an empty one is found. Returns the
-    remainder after the empty line.
-    """
-    buff = b""
-    while True:
-        data = sock.recv(bufsize)
-        if not data:
-            return b""
-
-        buff += data
-        while True:
-            try:
-                i = buff.index(b"\r\n")
-                line, buff = buff[:i], buff[i + 2 :]
-                if not line:
-                    return buff
-
-                yield line
-            except IndexError:
-                break
 
 
 HOST = "127.0.0.1"
@@ -200,8 +118,17 @@ with socket.socket() as server_sock:
         with client_sock:
             try:
                 request = Request.from_socket(client_sock)
+                try:
+                    content_length = int(request.headers.get("content-length", "0"))
+                except ValueError:
+                    content_length = 0
+
+                if content_length:
+                    body = request.body.read(content_length)
+                    print("Request Body", body)
+
                 if request.method != "GET":
-                    client_sock.sendall(NOT_FOUND_RESPONSE)
+                    client_sock.sendall(METHOD_NOT_ALLOWED_RESPONSE)
                     continue
 
                 serve_file(client_sock, request.path)
