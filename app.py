@@ -83,6 +83,25 @@ Content-length: 15
     b"\n", b"\r\n"
 )
 
+BAD_REQUEST_RESPONSE = b"""\
+HTTP/1.1 400 Bad Request
+Content-type: text/plain
+Content-length: 11
+
+Bad Request""".replace(
+    b"\n", b"\r\n"
+)
+
+NOT_FOUND_RESPONSE = b"""\
+HTTP/1.1 404 Not Found
+Content-type: text/plain
+Content-length: 9
+
+Not Found""".replace(
+    b"\n", b"\r\n"
+)
+
+
 with socket.socket() as server_sock:
     # Tell the kernel to reuse sockets that are in 'TIME_WAIT' state.
     server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -100,8 +119,12 @@ with socket.socket() as server_sock:
     while True:
         # Accept incomming connection
         client_sock, client_addr = server_sock.accept()
-        print(f"New connection from {client_addr}.")
+        print(f"Received connection from {client_addr}.")
         with client_sock:
-            request = Request.from_socket(client_sock)
-            print(request)
-            client_sock.sendall(RESPONSE)
+            try:
+                request = Request.from_socket(client_sock)
+                print(request)
+                client_sock.sendall(NOT_FOUND_RESPONSE)
+            except Exception as e:
+                print(f"Failed to parse request: {e}")
+                client_sock.sendall(BAD_REQUEST_RESPONSE)
