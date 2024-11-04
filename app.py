@@ -26,6 +26,36 @@ Content-length: {content_length}
     "\n", "\r\n"
 )
 
+class HTTPWorker(Thread):
+    def __init__(self, connection_queue: Queue) -> None:
+        super().__init__(daemon=True)
+
+        self.connection_queue = connection_queue
+        self.runnint = False
+
+    def stop(self) -> None:
+        self.running = False
+
+    def run(self) -> None:
+        self.running = False
+        while self.running:
+            try:
+                client_sock, client_addr = self.connection_queue.get(timeout=1)
+            except Empty:
+                continue
+
+            try:
+                self.handle_client(client_sock, client_addr)
+            except Exception:
+                print(f"Unhandled error: {e}")
+                continue
+            finally:
+                self.connection_queue.task_done()
+
+    def handle_client(self, client_sock: socket.socket, client_addr: typing.Tuple[str, int]) -> None:
+        with client_sock:
+            try:
+                request = Request.from_socket(client_sock)
 
 def serve_file(sock: socket.socket, path: str) -> None:
     """
